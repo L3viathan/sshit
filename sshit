@@ -9,7 +9,7 @@ import sys
 import queue
 import threading
 import docopt
-from sh import ssh
+import sh
 
 
 def worker(myhost):
@@ -18,7 +18,10 @@ def worker(myhost):
         command = q.get()
         if command is None:
             break
-        ssh(myhost, command)
+        try:
+            sh.ssh(myhost, command)
+        except sh.ErrorReturnCode:
+            pass
         q.task_done()
 
 
