@@ -32,10 +32,10 @@ async def execute_remotely(q, command):
             # We _don't_ want to redo the command on a different host, because
             # it is likely to fail in the same way.
             # We want to not reschedule the command, but collect the error.
-            async with trio.open_file("sshit.log", "a") as f:
-                f.write("[{}] $ {} failed:\n".format(host, command))
-                f.write(repr(e))
-                f.write("\n")
+            async with await trio.open_file("sshit.log", "a") as f:
+                await f.write("[{}] $ {} failed:\n".format(host, command))
+                await f.write(repr(e))
+                await f.write("\n")
             await q.put(host)
             return None
         else:
@@ -45,8 +45,8 @@ async def execute_remotely(q, command):
 
 async def main(hosts):
     q = trio.Queue(len(hosts))
-    async with trio.open_file("sshit.log", "w") as f:
-        f.write("")
+    async with await trio.open_file("sshit.log", "w") as f:
+        await f.write("")
     for host in hosts:
         await q.put(host)
     async with trio.wrap_file(sys.stdin) as f:
