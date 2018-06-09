@@ -15,19 +15,44 @@ import trio
 
 
 async def execute_remotely(q, command):
-    host = await q.get()
-    await trio.run_sync_in_worker_thread(sh.ssh, host, command)
-    await q.put(host)
+    while True:
+        # TODO: Figure out what to do if no hosts are available but commands
+        # are left.
+        # We should detect that, write an error and exit.
+        host = await q.get()
+        print("[{}] $ {}".format(host, command), file=sys.stderr)
+        try:
+            result = await trio.run_sync_in_worker_thread(sh.ssh, host, command)
+        except sh.ErrorReturnCode_255:
+            # ssh failed; probably host unreachable or similar.
+            # We want the task to be rescheduled and the host to be removed
+            pass
+        except sh.ErrorReturnCode as e:
+            # command failed, but ssh succeeded.
+            # We _don't_ want to redo the command on a different host, because
+            # it is likely to fail in the same way.
+            # We want to not reschedule the command, but collect the error.
+            async with trio.open_file("sshit.log", "a") as f:
+                f.write("[{}] $ {} failed:\n".format(host, command))
+                f.write(repr(e))
+                f.write("\n")
+            await q.put(host)
+            return None
+        else:
+            await q.put(host)
+            return result
 
 
 async def main(hosts):
     q = trio.Queue(len(hosts))
+    async with trio.open_file("sshit.log", "w") as f:
+        f.write("")
     for host in hosts:
         await q.put(host)
     async with trio.wrap_file(sys.stdin) as f:
         async with trio.open_nursery() as nursery:
             async for line in f:
-                nursery.start_soon(execute_remotely, q, line)
+                nursery.start_soon(execute_remotely, q, line.strip())
 
 
 if __name__ == "__main__":
