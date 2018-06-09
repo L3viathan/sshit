@@ -1,47 +1,35 @@
 #!/usr/bin/env python3
 """Run several commands on a number of hosts
 
+sshit reads the commands to run from stdin.
+
 Usage:
     sshit [HOSTS ...]
 
 """
 import sys
-import queue
-import threading
 import docopt
 import sh
+import trio
 
 
-def worker(myhost):
-    """Run all commands of a host."""
-    while True:
-        command = q.get()
-        if command is None:
-            break
-        try:
-            sh.ssh(myhost, command)
-        except sh.ErrorReturnCode:
-            q.task_done()
-            q.put(command)
-            print("ERR: On", myhost, "command", command, "failed.", file=sys.stderr)
-            print("Removing", myhost, "from workers", file=sys.stderr)
-        q.task_done()
+
+async def execute_remotely(q, command):
+    host = await q.get()
+    await trio.run_sync_in_worker_thread(sh.ssh, host, command)
+    await q.put(host)
+
+
+async def main(hosts):
+    q = trio.Queue(len(hosts))
+    for host in hosts:
+        await q.put(host)
+    async with trio.wrap_file(sys.stdin) as f:
+        async with trio.open_nursery() as nursery:
+            async for line in f:
+                nursery.start_soon(execute_remotely, q, line)
 
 
 if __name__ == "__main__":
     ARGS = docopt.docopt(__doc__, version="0.0.1")
-    hosts = ARGS["HOSTS"]
-    q = queue.Queue()
-    threads = []
-    for host in hosts:
-        t = threading.Thread(target=worker, args=(host,))
-        t.start()
-        threads.append(t)
-    for item in sys.stdin:
-        q.put(item)
-    q.join()
-    for _ in hosts:
-        q.put(None)
-    for t in threads:
-        if t.isAlive():  # thread might have killed itself
-            t.join()
+    trio.run(main, ARGS["HOSTS"])

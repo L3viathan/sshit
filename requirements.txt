@@ -1,2 +1,3 @@
 sh
 docopt
+trio==0.4.0
