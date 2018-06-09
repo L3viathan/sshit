@@ -34,7 +34,7 @@ async def execute_remotely(q, command):
             # We want to not reschedule the command, but collect the error.
             async with await trio.open_file("sshit.log", "a") as f:
                 await f.write("[{}] $ {} failed:\n".format(host, command))
-                await f.write(repr(e))
+                await f.write(e.stderr)
                 await f.write("\n")
             await q.put(host)
             return None
