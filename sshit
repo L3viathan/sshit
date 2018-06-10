@@ -22,18 +22,24 @@ async def execute_remotely(q, command, reschedule_failed=False):
             # command failed, but ssh succeeded.
             if reschedule_failed:
                 # with this option set, we want to reschedule all failed tasks
+                print(":/ [{}] $ {}, rescheduling.".format(host, command))
+                async with await trio.open_file("sshit.log", "a") as f:
+                    await f.write(":/ [{}] $ {}, rescheduling;".format(host, command))
+                    await f.write(e.stderr)
+                    await f.write("\n")
                 continue
             # We _don't_ want to redo the command on a different host, because
             # it is likely to fail in the same way.
             # We want to not reschedule the command, but collect the error.
             async with await trio.open_file("sshit.log", "a") as f:
-                await f.write("[{}] $ {} failed:\n".format(host, command))
+                await f.write(":( [{}] $ {}:\n".format(host, command))
                 await f.write(e.stderr)
                 await f.write("\n")
             await q.put(host)
             return None
         else:
             await q.put(host)
+            print(":) [{}] $ {} succeeded".format(host, command), file=sys.stderr)
             return result
 
 
