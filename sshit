@@ -1,20 +1,11 @@
 #!/usr/bin/env python3
-"""Run several commands on a number of hosts
-
-sshit reads the commands to run from stdin.
-
-Usage:
-    sshit [HOSTS ...]
-
-"""
 import sys
-import docopt
 import sh
+import click
 import trio
 
 
-
-async def execute_remotely(q, command):
+async def execute_remotely(q, command, reschedule_failed=False):
     while True:
         # TODO: Figure out what to do if no hosts are available but commands
         # are left.
@@ -26,9 +17,12 @@ async def execute_remotely(q, command):
         except sh.ErrorReturnCode_255:
             # ssh failed; probably host unreachable or similar.
             # We want the task to be rescheduled and the host to be removed
-            pass
+            continue
         except sh.ErrorReturnCode as e:
             # command failed, but ssh succeeded.
+            if reschedule_failed:
+                # with this option set, we want to reschedule all failed tasks
+                continue
             # We _don't_ want to redo the command on a different host, because
             # it is likely to fail in the same way.
             # We want to not reschedule the command, but collect the error.
@@ -43,7 +37,7 @@ async def execute_remotely(q, command):
             return result
 
 
-async def main(hosts):
+async def main(hosts, reschedule_failed=False):
     q = trio.Queue(len(hosts))
     async with await trio.open_file("sshit.log", "w") as f:
         await f.write("")
@@ -52,9 +46,28 @@ async def main(hosts):
     async with trio.wrap_file(sys.stdin) as f:
         async with trio.open_nursery() as nursery:
             async for line in f:
-                nursery.start_soon(execute_remotely, q, line.strip())
+                nursery.start_soon(execute_remotely, q, line.strip(), reschedule_failed)
+
+
+@click.command()
+@click.option(
+    "--reschedule-failed",
+    "-r",
+    is_flag=True,
+    help="When a command fails, reschedule it on a different host (and stop using this host). By default, this is only done when the SSH connection fails.",
+)
+@click.argument("hosts", nargs=-1, required=True)
+def cli(reschedule_failed, hosts):
+    """
+    Run a series of commands distributed on several machines.
+
+    The commands are read from stdin, the hosts provided as arguments. sshit is
+    most useful with hosts that share the same storage medium, where it doesn't
+    matter _where_ a particular command runs.
+    """
+    trio.run(main, hosts,
+    reschedule_failed)
 
 
 if __name__ == "__main__":
-    ARGS = docopt.docopt(__doc__, version="0.0.1")
-    trio.run(main, ARGS["HOSTS"])
+    cli()
